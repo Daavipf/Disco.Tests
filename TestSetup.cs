@@ -1,10 +1,13 @@
 using System;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Disco.Models;
+using Moq;
 
 public abstract class TestSetup : IDisposable
 {
   protected readonly AppDbContext context;
+  protected readonly Mock<IConfiguration> mockConfig;
 
   public TestSetup()
   {
@@ -14,9 +17,12 @@ public abstract class TestSetup : IDisposable
 
     context = new AppDbContext(options);
 
-    SeedUser(context);
+    mockConfig = new Mock<IConfiguration>();
+    mockConfig.Setup(c => c["Jwt:Key"]).Returns("uma_chave_super_secreta_com_pelo_menos_32_caracteres");
 
     context.Database.EnsureCreated();
+
+    SeedUser(context);
   }
 
   public void Dispose()
