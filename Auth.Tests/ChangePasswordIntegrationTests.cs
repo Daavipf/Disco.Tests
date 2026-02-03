@@ -1,39 +1,38 @@
-using Microsoft.Extensions.Configuration;
-using Disco.Models;
 using Disco.DTOs;
-using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net.Http.Json;
+using System.Net;
+using Microsoft.Extensions.DependencyInjection;
+using Disco.Models;
 using Microsoft.EntityFrameworkCore;
-using Moq;
-using Xunit;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Disco.Tests;
 
-public class ChangePasswordIntegrationTests : TestSetup
+public class ChangePasswordIntegrationTests : IClassFixture<ApiFactory>
 {
-    private readonly AuthController authController;
+    private readonly HttpClient _client;
+    private readonly ApiFactory _factory;
 
-    public ChangePasswordIntegrationTests()
+    public ChangePasswordIntegrationTests(ApiFactory factory)
     {
-        authController = new AuthController(context, mockConfig.Object);
+        _client = factory.CreateClient();
+        _factory = factory;
     }
 
     [Fact]
     public async Task TestChangePassword()
     {
-        var forgotPasswordRequest = new ForgotPasswordDTO
+        var forgotPasswordRequest = new ForgotPasswordDTO { Email = "teste@email.com" };
+        var forgotResponse = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
+        Assert.Equal(HttpStatusCode.NoContent, forgotResponse.StatusCode);
+
+        string token;
+        using (var scope = _factory.Services.CreateScope())
         {
-            Email = "teste@email.com"
-        };
-
-        var request = await authController.ForgotPassword(forgotPasswordRequest);
-        var response = Assert.IsType<NoContentResult>(request);
-        Assert.Equal(204, response.StatusCode);
-
-        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == forgotPasswordRequest.Email);
-        Assert.NotNull(user);
-
-        var token = user.Resetpasswordtoken;
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == "teste@email.com");
+            Assert.NotNull(user);
+            token = user.Resetpasswordtoken;
+        }
 
         var resetPasswordRequest = new ResetPasswordDTO
         {
@@ -41,70 +40,51 @@ public class ChangePasswordIntegrationTests : TestSetup
             Password = "Suki4321",
             ConfirmPassword = "Suki4321"
         };
+        var resetResponse = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
+        Assert.Equal(HttpStatusCode.OK, resetResponse.StatusCode);
 
-        request = await authController.ResetPassword(resetPasswordRequest);
-        var newResponse = Assert.IsType<OkObjectResult>(request);
-        Assert.Equal(200, newResponse.StatusCode);
-
-        var loginRequest = await authController.Login(new LoginDTO { Email = "teste@email.com", Password = "Suki4321" });
-        var loginResponse = Assert.IsType<OkObjectResult>(loginRequest);
+        var loginRequest = new LoginDTO { Email = "teste@email.com", Password = "Suki4321" };
+        var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
     }
 
     [Fact]
     public async Task TestConflictingPasswordsPassword()
     {
-        var forgotPasswordRequest = new ForgotPasswordDTO
+        var forgotPasswordRequest = new ForgotPasswordDTO { Email = "teste@email.com" };
+        await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
+
+        string token;
+        using (var scope = _factory.Services.CreateScope())
         {
-            Email = "teste@email.com"
-        };
-
-        var request = await authController.ForgotPassword(forgotPasswordRequest);
-        var response = Assert.IsType<NoContentResult>(request);
-        Assert.Equal(204, response.StatusCode);
-
-        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == forgotPasswordRequest.Email);
-        Assert.NotNull(user);
-
-        var token = user.Resetpasswordtoken;
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.FirstAsync(u => u.Email == "teste@email.com");
+            token = user.Resetpasswordtoken;
+        }
 
         var resetPasswordRequest = new ResetPasswordDTO
         {
             Token = token,
             Password = "Suki4321",
-            ConfirmPassword = "Suki4322"
+            ConfirmPassword = "Suki4322" // Divergente
         };
+        var response = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
 
-        request = await authController.ResetPassword(resetPasswordRequest);
-        var newResponse = Assert.IsType<BadRequestObjectResult>(request);
-        Assert.Equal(400, newResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
     public async Task TestInvalidTokenPassword()
     {
-        var forgotPasswordRequest = new ForgotPasswordDTO
-        {
-            Email = "teste@email.com"
-        };
-
-        var request = await authController.ForgotPassword(forgotPasswordRequest);
-        var response = Assert.IsType<NoContentResult>(request);
-        Assert.Equal(204, response.StatusCode);
-
-        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == forgotPasswordRequest.Email);
-        Assert.NotNull(user);
-
-        var token = "invalid-token";
-
         var resetPasswordRequest = new ResetPasswordDTO
         {
-            Token = token,
+            Token = "token-invalido-qualquer",
             Password = "Suki4321",
             ConfirmPassword = "Suki4321"
         };
 
-        request = await authController.ResetPassword(resetPasswordRequest);
-        var newResponse = Assert.IsType<BadRequestObjectResult>(request);
-        Assert.Equal(400, newResponse.StatusCode);
+        var response = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

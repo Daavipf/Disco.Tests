@@ -1,21 +1,21 @@
-using Microsoft.Extensions.Configuration;
-using Disco.Models;
 using Disco.DTOs;
-using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net.Http.Json;
+using System.Net;
+using Microsoft.Extensions.DependencyInjection;
+using Disco.Models;
 using Microsoft.EntityFrameworkCore;
-using Moq;
-using Xunit;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Disco.Tests;
 
-public class AccountVerificationIntegrationTests : TestSetup
+public class AccountVerificationIntegrationTests : IClassFixture<ApiFactory>
 {
-    private readonly AuthController authController;
+    private readonly HttpClient _client;
+    private readonly ApiFactory _factory;
 
-    public AccountVerificationIntegrationTests()
+    public AccountVerificationIntegrationTests(ApiFactory factory)
     {
-        authController = new AuthController(context, mockConfig.Object);
+        _client = factory.CreateClient();
+        _factory = factory;
     }
 
     [Fact]
@@ -29,23 +29,26 @@ public class AccountVerificationIntegrationTests : TestSetup
             ConfirmPassword = "Suki1234"
         };
 
-        var signupResult = await authController.Signup(signupDTO);
+        var signupResponse = await _client.PostAsJsonAsync("/api/auth/signup", signupDTO);
+        Assert.Equal(HttpStatusCode.Created, signupResponse.StatusCode);
 
-        var createdResult = Assert.IsType<CreatedResult>(signupResult);
-        Assert.Equal(201, createdResult.StatusCode);
+        var signupData = await signupResponse.Content.ReadFromJsonAsync<SignupResponseDTO>();
+        Assert.NotNull(signupData);
+        Assert.False(signupData.User.Isverified);
 
-        var dadosRetorno = Assert.IsType<SignupResponseDTO>(createdResult.Value);
-        Assert.Equal("suki@email.com", dadosRetorno.User.Email);
-        Assert.False(dadosRetorno.User.Isverified);
+        var verificationToken = signupData.Token;
+        var verifyResponse = await _client.PostAsync($"/api/auth/verify?token={verificationToken}", null);
 
-        var verificationToken = dadosRetorno.Token;
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
 
-        var verifyResult = await authController.VerifyAccount(verificationToken);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == signupDTO.Email);
 
-        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == signupDTO.Email);
-
-        Assert.NotNull(user);
-        Assert.True(user.Isverified);
+            Assert.NotNull(user);
+            Assert.True(user.Isverified);
+        }
     }
 
     [Fact]
@@ -53,9 +56,11 @@ public class AccountVerificationIntegrationTests : TestSetup
     {
         var verificationToken = "token-invalido";
 
-        var verifyResult = await authController.VerifyAccount(verificationToken);
+        var response = await _client.PostAsync($"/api/auth/verify?token={verificationToken}", null);
 
-        var badResult = Assert.IsType<BadRequestObjectResult>(verifyResult);
-        Assert.Equal("Token de verificação inválido.", badResult.Value);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var errorMessage = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Token de verificação inválido.", errorMessage);
     }
 }

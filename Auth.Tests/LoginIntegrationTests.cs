@@ -1,62 +1,58 @@
-﻿using Microsoft.Extensions.Configuration;
-using Disco.Models;
-using Disco.DTOs;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Moq;
-using Xunit;
-using Microsoft.AspNetCore.Mvc;
+﻿using Disco.DTOs;
+using System.Net.Http.Json;
+using System.Net;
 
 namespace Disco.Tests;
 
-public class LoginIntegrationTests : TestSetup
+public class LoginIntegrationTests : IClassFixture<ApiFactory>
 {
-    private readonly AuthController authController;
+    private readonly HttpClient _client;
 
-    public LoginIntegrationTests()
+    public LoginIntegrationTests(ApiFactory factory)
     {
-        authController = new AuthController(context, mockConfig.Object);
+        _client = factory.CreateClient();
     }
 
     [Fact]
     public async Task TestCorrectLogin()
     {
-        var senhaOriginal = "senha123";
+        var loginDto = new LoginDTO { Email = "teste@email.com", Password = "senha123" };
 
-        var loginDto = new LoginDTO { Email = "teste@email.com", Password = senhaOriginal };
+        var response = await _client.PostAsJsonAsync<LoginDTO>("/api/auth/login", loginDto);
 
-        var result = await authController.Login(loginDto);
-
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.Equal(200, okResult.StatusCode);
-
-        var dadosRetorno = Assert.IsType<LoginResponseDTO>(okResult.Value);
-        Assert.NotNull(dadosRetorno.Token);
-        Assert.Equal("teste@email.com", dadosRetorno.User.Email);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var responseData = await response.Content.ReadFromJsonAsync<LoginResponseDTO>();
+        Assert.NotNull(responseData.Token);
+        Assert.Equal("teste@email.com", responseData.User.Email);
     }
 
     [Fact]
     public async Task TestIncorrectPasswordLogin()
     {
-        var senhaOriginal = "senha321";
-        var loginDto = new LoginDTO { Email = "teste@email.com", Password = senhaOriginal };
+        var loginDto = new LoginDTO { Email = "teste@email.com", Password = "senha321" };
 
-        var result = await authController.Login(loginDto);
+        var response = await _client.PostAsJsonAsync<LoginDTO>("/api/auth/login", loginDto);
 
-        var unauthorizedResult = Assert.IsType<UnauthorizedObjectResult>(result);
-        Assert.Equal(401, unauthorizedResult.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
     public async Task TestNonExistentEmailLogin()
     {
-        var senhaOriginal = "senha123";
+        var loginDto = new LoginDTO { Email = "wrong@email.com", Password = "senha123" };
 
-        var loginDto = new LoginDTO { Email = "wrong@email.com", Password = senhaOriginal };
+        var response = await _client.PostAsJsonAsync<LoginDTO>("/api/auth/login", loginDto);
 
-        var result = await authController.Login(loginDto);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 
-        var unauthorizedResult = Assert.IsType<UnauthorizedObjectResult>(result);
-        Assert.Equal(401, unauthorizedResult.StatusCode);
+    [Fact]
+    public async Task TestMissingFieldsLogin()
+    {
+        var loginDto = new LoginDTO { Email = "wrong@email.com" };
+
+        var response = await _client.PostAsJsonAsync<LoginDTO>("/api/auth/login", loginDto);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

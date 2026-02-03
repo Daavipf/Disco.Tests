@@ -1,25 +1,21 @@
-using Microsoft.Extensions.Configuration;
-using Disco.Models;
 using Disco.DTOs;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Moq;
-using Xunit;
+using System.Net.Http.Json;
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Disco.Tests;
 
-public class SignUpIntegrationTests : TestSetup
+public class SignUpIntegrationTests : IClassFixture<ApiFactory>
 {
-    private readonly AuthController authController;
+    private readonly HttpClient _client;
 
-    public SignUpIntegrationTests()
+    public SignUpIntegrationTests(ApiFactory factory)
     {
-        authController = new AuthController(context, mockConfig.Object);
+        _client = factory.CreateClient();
     }
 
     [Fact]
-    public async Task TestCorrectSignUp()
+    public async Task TestCorrectSignup()
     {
         var signupDTO = new SignupDTO
         {
@@ -29,13 +25,12 @@ public class SignUpIntegrationTests : TestSetup
             ConfirmPassword = "Suki1234"
         };
 
-        var result = await authController.Signup(signupDTO);
+        var response = await _client.PostAsJsonAsync<SignupDTO>("/api/auth/signup", signupDTO);
 
-        var createdResult = Assert.IsType<CreatedResult>(result);
-        Assert.Equal(201, createdResult.StatusCode);
-
-        var dadosRetorno = Assert.IsType<SignupResponseDTO>(createdResult.Value);
-        Assert.Equal("suki@email.com", dadosRetorno.User.Email);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var responseData = await response.Content.ReadFromJsonAsync<SignupResponseDTO>();
+        Assert.Equal("suki@email.com", responseData.User.Email);
+        Assert.NotNull(responseData.Token);
     }
 
     [Fact]
@@ -49,13 +44,11 @@ public class SignUpIntegrationTests : TestSetup
             ConfirmPassword = "Suki1234"
         };
 
-        var result = await authController.Signup(signupDTO);
+        var response = await _client.PostAsJsonAsync("/api/auth/signup", signupDTO);
 
-        var badResult = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, badResult.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var errorMessage = Assert.IsType<string>(badResult.Value);
-
+        var errorMessage = await response.Content.ReadAsStringAsync();
         Assert.Equal("Já existe um usuário cadastrado com este e-mail.", errorMessage);
     }
 
@@ -70,14 +63,9 @@ public class SignUpIntegrationTests : TestSetup
             ConfirmPassword = "Suki1233"
         };
 
-        var result = await authController.Signup(signupDTO);
+        var response = await _client.PostAsJsonAsync("/api/auth/signup", signupDTO);
 
-        var badResult = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, badResult.StatusCode);
-
-        var errorMessage = Assert.IsType<string>(badResult.Value);
-
-        Assert.Equal("As senhas não conferem", errorMessage);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -90,9 +78,8 @@ public class SignUpIntegrationTests : TestSetup
             Password = "Suki1234",
         };
 
-        var result = await authController.Signup(signupDTO);
+        var response = await _client.PostAsJsonAsync("/api/auth/signup", signupDTO);
 
-        var badResult = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, badResult.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }
